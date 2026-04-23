@@ -1,6 +1,6 @@
 # Go Kafka Boilerplate
 
-A minimal Kafka producer/consumer boilerplate in Go using `segmentio/kafka-go` with a centralized `KafkaClient` that encapsulates context, logger, and broker configuration.
+A minimal Kafka producer/consumer boilerplate in Go using `segmentio/kafka-go` with a centralized `KafkaClient`.
 
 ## Project Structure
 
@@ -17,25 +17,28 @@ go-kafka-boilerplate/
 ## Core Components
 
 - `pkg/client.go`
-  - Defines `KafkaClient` struct: holds logger, context, and brokers
+  - Defines `KafkaClient` that stores logger, context, and brokers
   - Exposes `New(logger, ctx, brokers)` constructor
-  - Central point for all Kafka operations
+  - Must be created first and passed to producer/consumer
 
 - `pkg/producer.go`
-  - Defines `KafkaProducer` struct
-  - Exposes `NewProducer(client, topic)` constructor
-  - Provides `Publish(key, value)` and `Close()` methods
+  - Defines `KafkaProducer`
+  - Exposes `NewProducer(client, topic)`
+  - `Publish(key, value)` wraps payload into a `Job` envelope (with UUID and metadata) before writing to Kafka
+  - `Close()` closes producer writer
 
 - `pkg/consumer.go`
-  - Defines `MessageHandler` callback type: `func(client, key, value) error`
-  - Exposes `StartConsumer(client, topic, groupID, handler)`
-  - Reads messages continuously and passes each message to your handler
+  - Defines `Job` model
+  - Exposes:
+    - `StartConsumer(client, topic, groupID, maxRetries, handler, onFailure)`
+  - Reads Kafka message, unmarshals into `Job`, passes `job.Payload` to `handler`, and commits on success
 
 ## Dependencies
 
-Main runtime dependencies include:
+Main runtime dependencies:
 
 - `github.com/segmentio/kafka-go`
+- `github.com/google/uuid`
 
 ## Quick Usage
 
@@ -44,7 +47,7 @@ package main
 
 import (
     "context"
-    "fmt"
+    "encoding/json"
     "time"
 
     "github.com/NishLy/go-kafka-boilerplate/pkg"
@@ -55,29 +58,39 @@ func main() {
     brokers := []string{"localhost:9092"}
     topic := "events"
     groupID := "demo-group"
+    maxRetries := 3
 
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
 
-    // Initialize logger
     logger, _ := zap.NewProduction()
     sugar := logger.Sugar()
     defer logger.Sync()
 
-    // Create KafkaClient first
+    // 1) Declare Kafka client first
     client := pkg.New(sugar, ctx, brokers)
 
-    // Producer
+    // 2) Use client to create producer
     p := pkg.NewProducer(client, topic)
     defer p.Close()
 
-    _ = p.Publish("user-1", "hello from producer")
+    // value must be valid JSON string because producer stores it as json.RawMessage
+    _ = p.Publish("user-1", `{"event":"hello from producer"}`)
 
-    // Consumer
-    go pkg.StartConsumer(client, topic, groupID, func( key, value []byte) error {
-        fmt.Printf("received key=%s value=%s\n", string(key), string(value))
-        return nil
-    })
+    // 3) Use same client to start consumer
+    go pkg.StartConsumer(
+        client,
+        topic,
+        groupID,
+        maxRetries,
+        func(key []byte, payload json.RawMessage) error {
+            sugar.Infof("received key=%s payload=%s", string(key), string(payload))
+            return nil
+        },
+        func(key []byte, job pkg.Job, err error) {
+            sugar.Errorf("failed key=%s retries=%d err=%v", string(key), job.Retries, err)
+        },
+    )
 
     time.Sleep(5 * time.Second)
 }
@@ -85,14 +98,10 @@ func main() {
 
 ## Key Design Pattern
 
-Always initialize `KafkaClient` first:
+Always declare `KafkaClient` first:
 
 ```go
 client := pkg.New(logger, ctx, brokers)
 ```
 
-Then pass the client to producer and consumer. This ensures:
-
-- Unified context management
-- Consistent logging across operations
-- Centralized broker configuration
+Then pass that client into producer and consumer so they share the same context, logger, and broker configuration.
