@@ -1,6 +1,6 @@
 # Go Kafka Boilerplate
 
-A minimal Kafka producer/consumer boilerplate in Go using `segmentio/kafka-go` with structured logging via `zap`.
+A minimal Kafka producer/consumer boilerplate in Go using `segmentio/kafka-go` with a centralized `KafkaClient` that encapsulates context, logger, and broker configuration.
 
 ## Project Structure
 
@@ -8,37 +8,34 @@ A minimal Kafka producer/consumer boilerplate in Go using `segmentio/kafka-go` w
 go-kafka-boilerplate/
 ├── go.mod
 ├── go.sum
-├── intenal/
-│   ├── consumer/
-│   │   └── consumer.go
-│   └── producer/
-│       └── producer.go
 └── pkg/
-    └── log.go
+    ├── client.go
+    ├── consumer.go
+    └── producer.go
 ```
 
-## What Each Package Does
+## Core Components
 
-- `intenal/producer/producer.go`
-  - Defines `KafkaProducer`
-  - Creates a configured Kafka writer
-  - Exposes `Publish(ctx, key, value)` and `Close()`
+- `pkg/client.go`
+  - Defines `KafkaClient` struct: holds logger, context, and brokers
+  - Exposes `New(logger, ctx, brokers)` constructor
+  - Central point for all Kafka operations
 
-- `intenal/consumer/consumer.go`
-  - Defines `MessageHandler` callback type
-  - Exposes `StartConsumer(ctx, brokers, topic, groupID, handler)`
+- `pkg/producer.go`
+  - Defines `KafkaProducer` struct
+  - Exposes `NewProducer(client, topic)` constructor
+  - Provides `Publish(key, value)` and `Close()` methods
+
+- `pkg/consumer.go`
+  - Defines `MessageHandler` callback type: `func(client, key, value) error`
+  - Exposes `StartConsumer(client, topic, groupID, handler)`
   - Reads messages continuously and passes each message to your handler
-
-- `pkg/log.go`
-  - Initializes global `pkg.Logger` (`zap.SugaredLogger`)
-  - Used by producer/consumer for logging
 
 ## Dependencies
 
 Main runtime dependencies include:
 
 - `github.com/segmentio/kafka-go`
-- `go.uber.org/zap`
 
 ## Quick Usage
 
@@ -50,9 +47,8 @@ import (
     "fmt"
     "time"
 
-    reader "github.com/NishLy/go-kafka-boilerplate/internal/consumer"
-    "github.com/NishLy/go-kafka-boilerplate/internal/producer"
     "github.com/NishLy/go-kafka-boilerplate/pkg"
+    "go.uber.org/zap"
 )
 
 func main() {
@@ -63,17 +59,22 @@ func main() {
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
 
-    // Initialize logging (optional, but recommended)
-    pkg.InitKafkaLogger()
+    // Initialize logger
+    logger, _ := zap.NewProduction()
+    sugar := logger.Sugar()
+    defer logger.Sync()
+
+    // Create KafkaClient first
+    client := pkg.New(sugar, ctx, brokers)
 
     // Producer
-    p := producer.NewProducer(brokers, topic)
+    p := pkg.NewProducer(client, topic)
     defer p.Close()
 
-    _ = p.Publish(ctx, "user-1", "hello from producer")
+    _ = p.Publish("user-1", "hello from producer")
 
     // Consumer
-    go reader.StartConsumer(ctx, brokers, topic, groupID, func(ctx context.Context, key, value []byte) error {
+    go pkg.StartConsumer(client, topic, groupID, func(c *pkg.KafkaClient, key, value []byte) error {
         fmt.Printf("received key=%s value=%s\n", string(key), string(value))
         return nil
     })
@@ -82,6 +83,16 @@ func main() {
 }
 ```
 
-## Notes
+## Key Design Pattern
 
-- The current module name in `go.mod` is `github.com/NishLy/go-kafka-boilerplate`, and imports should match it exactly.
+Always initialize `KafkaClient` first:
+
+```go
+client := pkg.New(logger, ctx, brokers)
+```
+
+Then pass the client to producer and consumer. This ensures:
+
+- Unified context management
+- Consistent logging across operations
+- Centralized broker configuration

@@ -1,29 +1,24 @@
-package producer
+package pkg
 
 import (
-	"context"
-
 	"time"
 
-	"github.com/NishLy/go-kafka-boilerplate/pkg"
 	"github.com/segmentio/kafka-go"
 )
 
 // KafkaProducer wraps the segmentio writer
 type KafkaProducer struct {
 	Writer *kafka.Writer
+	Client *KafkaClient
 }
 
 // NewProducer initializes a new callable producer
-func NewProducer(brokers []string, topic string) *KafkaProducer {
-	// check logger is initialized
-	if pkg.Logger == nil {
-		pkg.InitKafkaLogger()
-	}
+func NewProducer(client *KafkaClient, topic string) *KafkaProducer {
 
 	return &KafkaProducer{
+		Client: client,
 		Writer: &kafka.Writer{
-			Addr:         kafka.TCP(brokers...),
+			Addr:         kafka.TCP(client.brokers...),
 			Topic:        topic,
 			Balancer:     &kafka.Hash{}, // Ensures same Key goes to same Partition
 			MaxAttempts:  3,
@@ -34,14 +29,14 @@ func NewProducer(brokers []string, topic string) *KafkaProducer {
 }
 
 // Publish is your callable function
-func (p *KafkaProducer) Publish(ctx context.Context, key string, value string) error {
-	err := p.Writer.WriteMessages(ctx, kafka.Message{
+func (p *KafkaProducer) Publish(key string, value string) error {
+	err := p.Writer.WriteMessages(p.Client.ctx, kafka.Message{
 		Key:   []byte(key),
 		Value: []byte(value),
 	})
 
 	if err != nil {
-		pkg.Logger.Errorf("Failed to publish message: %v", err)
+		p.Client.log.Errorf("Failed to publish message: %v", err)
 		return err
 	}
 
@@ -50,5 +45,6 @@ func (p *KafkaProducer) Publish(ctx context.Context, key string, value string) e
 
 // Close cleans up the connection
 func (p *KafkaProducer) Close() error {
+	p.Client.log.Infof("Closing producer for topic: %s", p.Writer.Topic)
 	return p.Writer.Close()
 }
