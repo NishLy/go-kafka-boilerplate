@@ -1,4 +1,4 @@
-module go-kafka-boilerlate
+module github.com/NishLy/go-kafka-boilerplate
 
 go 1.25.3
 

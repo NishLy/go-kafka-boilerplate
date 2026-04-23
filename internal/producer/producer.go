@@ -2,9 +2,10 @@ package producer
 
 import (
 	"context"
-	"go-kafka-boilerlate/pkg"
+
 	"time"
 
+	"github.com/NishLy/go-kafka-boilerplate/pkg"
 	"github.com/segmentio/kafka-go"
 )
 
@@ -15,6 +16,11 @@ type KafkaProducer struct {
 
 // NewProducer initializes a new callable producer
 func NewProducer(brokers []string, topic string) *KafkaProducer {
+	// check logger is initialized
+	if pkg.Logger == nil {
+		pkg.InitKafkaLogger()
+	}
+
 	return &KafkaProducer{
 		Writer: &kafka.Writer{
 			Addr:         kafka.TCP(brokers...),

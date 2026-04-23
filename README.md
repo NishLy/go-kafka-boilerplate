@@ -50,8 +50,9 @@ import (
     "fmt"
     "time"
 
-    reader "go-kafka-boilerlate/intenal/consumer"
-    "go-kafka-boilerlate/intenal/producer"
+    reader "github.com/NishLy/go-kafka-boilerplate/internal/consumer"
+    "github.com/NishLy/go-kafka-boilerplate/internal/producer"
+    "github.com/NishLy/go-kafka-boilerplate/pkg"
 )
 
 func main() {
@@ -61,6 +62,9 @@ func main() {
 
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
+
+    // Initialize logging (optional, but recommended)
+    pkg.InitKafkaLogger()
 
     // Producer
     p := producer.NewProducer(brokers, topic)
@@ -80,4 +84,4 @@ func main() {
 
 ## Notes
 
-- The current module name in `go.mod` is `go-kafka-boilerlate`, and imports should match it exactly.
+- The current module name in `go.mod` is `github.com/NishLy/go-kafka-boilerplate`, and imports should match it exactly.

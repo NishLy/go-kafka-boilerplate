@@ -2,8 +2,8 @@ package reader
 
 import (
 	"context"
-	"go-kafka-boilerlate/pkg"
 
+	"github.com/NishLy/go-kafka-boilerplate/pkg"
 	"github.com/segmentio/kafka-go"
 )
 
@@ -12,6 +12,11 @@ type MessageHandler func(ctx context.Context, key, value []byte) error
 
 // StartConsumer encapsulates the Segmentio reader logic
 func StartConsumer(ctx context.Context, brokers []string, topic, groupID string, handler MessageHandler) {
+	// check logger is initialized
+	if pkg.Logger == nil {
+		pkg.InitKafkaLogger()
+	}
+
 	reader := kafka.NewReader(kafka.ReaderConfig{
 		Brokers: brokers,
 		Topic:   topic,
