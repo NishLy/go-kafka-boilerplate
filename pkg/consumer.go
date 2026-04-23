@@ -5,7 +5,7 @@ import (
 )
 
 // StartConsumer encapsulates the Segmentio reader logic
-func StartConsumer(client *KafkaClient, topic, groupID string, handler func(key, value []byte) error) {
+func StartConsumer(client *KafkaClient, topic, groupID string, handler func(key []byte, value []byte) error) {
 
 	reader := kafka.NewReader(kafka.ReaderConfig{
 		Brokers: client.brokers,
