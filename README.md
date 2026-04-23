@@ -80,5 +80,4 @@ func main() {
 
 ## Notes
 
-- The current folder name is `intenal` (not `internal`), and imports use that path.
 - The current module name in `go.mod` is `go-kafka-boilerlate`, and imports should match it exactly.
