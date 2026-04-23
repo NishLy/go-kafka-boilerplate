@@ -1,8 +1,10 @@
 package pkg
 
 import (
+	"encoding/json"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/segmentio/kafka-go"
 )
 
@@ -30,9 +32,25 @@ func NewProducer(client *KafkaClient, topic string) *KafkaProducer {
 
 // Publish is your callable function
 func (p *KafkaProducer) Publish(key string, value string) error {
-	err := p.Writer.WriteMessages(p.Client.ctx, kafka.Message{
+
+	var job = Job{
+		ID:        uuid.New().String(),
+		CreatedAt: time.Now(),
+		Payload:   json.RawMessage(value),
+		Retries:   0,
+		Topic:     p.Writer.Topic,
+	}
+
+	var jobBytes, err = json.Marshal(job)
+
+	if err != nil {
+		p.Client.log.Errorf("Failed to marshal job: %v", err)
+		return err
+	}
+
+	err = p.Writer.WriteMessages(p.Client.ctx, kafka.Message{
 		Key:   []byte(key),
-		Value: []byte(value),
+		Value: []byte(jobBytes),
 	})
 
 	if err != nil {

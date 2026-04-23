@@ -1,11 +1,23 @@
 package pkg
 
 import (
+	"encoding/json"
+	"time"
+
 	"github.com/segmentio/kafka-go"
 )
 
+type Job struct {
+	ID        string          `json:"id"`
+	Topic     string          `json:"topic"`
+	Retries   int             `json:"retries"`
+	Status    string          `json:"status"` // optional
+	CreatedAt time.Time       `json:"created_at"`
+	Payload   json.RawMessage `json:"payload"`
+}
+
 // StartConsumer encapsulates the Segmentio reader logic
-func StartConsumer(client *KafkaClient, topic, groupID string, handler func(key []byte, value []byte) error) {
+func StartConsumer(client *KafkaClient, topic, groupID string, maxRetries int, handler func(key []byte, payload json.RawMessage) error, onFailure func(key []byte, job Job, err error)) {
 
 	reader := kafka.NewReader(kafka.ReaderConfig{
 		Brokers: client.brokers,
@@ -22,21 +34,41 @@ func StartConsumer(client *KafkaClient, topic, groupID string, handler func(key 
 	client.log.Infof("Consumer started for topic: %s, group: %s", topic, groupID)
 
 	for {
-		// FetchMessage handles offset commits automatically by default
-		m, err := reader.ReadMessage(client.ctx)
+		m, err := reader.FetchMessage(client.ctx)
 		if err != nil {
-			// If context was cancelled, exit gracefully
 			if client.ctx.Err() != nil {
 				return
 			}
-			client.log.Errorf("Error reading message: %v", err)
+			client.log.Errorf("Fetch error: %v", err)
 			continue
 		}
 
-		// Trigger the callback
-		if err := handler(m.Key, m.Value); err != nil {
+		// Deserialize message into Job struct
+		var job Job
+		if err := json.Unmarshal(m.Value, &job); err != nil {
+			client.log.Errorf("JSON unmarshal error: %v", err)
+			// Optionally, commit the message to skip it
+			if err := reader.CommitMessages(client.ctx, m); err != nil {
+				client.log.Errorf("Commit error for malformed message: %v", err)
+			}
+			continue
+		}
+
+		// Process first
+		if err := handler(m.Key, job.Payload); err != nil {
 			client.log.Errorf("Handler error: %v", err)
-			// Decide here if you want to retry or skip
+
+			// Increment retry count and optionally call onFailure callback
+			job.Retries++
+
+			if onFailure != nil {
+				onFailure(m.Key, job, err)
+			}
+			continue
+		}
+
+		if err := reader.CommitMessages(client.ctx, m); err != nil {
+			client.log.Errorf("Commit error: %v", err)
 		}
 	}
 }
