@@ -4,11 +4,8 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
-// MessageHandler defines the callback signature
-type MessageHandler func(client *KafkaClient, key, value []byte) error
-
 // StartConsumer encapsulates the Segmentio reader logic
-func StartConsumer(client *KafkaClient, topic, groupID string, handler MessageHandler) {
+func StartConsumer(client *KafkaClient, topic, groupID string, handler func(key, value []byte) error) {
 
 	reader := kafka.NewReader(kafka.ReaderConfig{
 		Brokers: client.brokers,
@@ -37,7 +34,7 @@ func StartConsumer(client *KafkaClient, topic, groupID string, handler MessageHa
 		}
 
 		// Trigger the callback
-		if err := handler(client, m.Key, m.Value); err != nil {
+		if err := handler(m.Key, m.Value); err != nil {
 			client.log.Errorf("Handler error: %v", err)
 			// Decide here if you want to retry or skip
 		}

@@ -74,7 +74,7 @@ func main() {
     _ = p.Publish("user-1", "hello from producer")
 
     // Consumer
-    go pkg.StartConsumer(client, topic, groupID, func(c *pkg.KafkaClient, key, value []byte) error {
+    go pkg.StartConsumer(client, topic, groupID, func( key, value []byte) error {
         fmt.Printf("received key=%s value=%s\n", string(key), string(value))
         return nil
     })
