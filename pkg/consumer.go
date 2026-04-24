@@ -7,6 +7,12 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
+type ConsumerConfig struct {
+	Topic      string
+	GroupID    string
+	MaxRetries int
+}
+
 type Job struct {
 	ID        string          `json:"id"`
 	Topic     string          `json:"topic"`
@@ -16,66 +22,87 @@ type Job struct {
 	Payload   json.RawMessage `json:"payload"`
 }
 
-// StartConsumer encapsulates the Segmentio reader logic
-func StartConsumer(client *KafkaClient, topic, groupID string, maxRetries int, handler func(key []byte, payload json.RawMessage) error, onFailure func(key []byte, job Job, err error)) {
+type kafkaConsumer struct {
+	Client    *KafkaClient
+	Config    kafka.ReaderConfig
+	onFailure func(key []byte, job Job, err error)
+}
 
-	reader := kafka.NewReader(kafka.ReaderConfig{
-		Brokers: client.brokers,
-		Topic:   topic,
-		GroupID: groupID,
-	})
+type KafkaConsumer interface {
+	Consume(handler func(key []byte, payload json.RawMessage) error)
+	OnFailure(func(key []byte, job Job, err error))
+}
+
+func NewConsumer(client *KafkaClient, config kafka.ReaderConfig) KafkaConsumer {
+	return &kafkaConsumer{
+		Client: client,
+		Config: config,
+	}
+}
+
+func (c *kafkaConsumer) OnFailure(callback func(key []byte, job Job, err error)) {
+	c.onFailure = callback
+}
+
+func (c *kafkaConsumer) Consume(handler func(key []byte, payload json.RawMessage) error) {
+	if handler == nil {
+		c.Client.log.Warnf("No handler provided for Consume, exiting")
+		return
+	}
+
+	reader := kafka.NewReader(c.Config)
 
 	// Handle graceful shutdown
 	defer func() {
 		if err := reader.Close(); err != nil {
-			client.log.Errorf("Error closing reader: %v", err)
+			c.Client.log.Errorf("Error closing reader: %v", err)
 		}
 	}()
 
 	// Ensure cleanup when the context is cancelled or function exits
 	go func() {
-		<-client.ctx.Done()
+		<-c.Client.ctx.Done()
 		reader.Close()
 	}()
 
-	client.log.Infof("Consumer started for topic: %s, group: %s", topic, groupID)
+	c.Client.log.Infof("Consumer started for topic: %s, group: %s", c.Config.Topic, c.Config.GroupID)
 
 	for {
-		m, err := reader.FetchMessage(client.ctx)
+		m, err := reader.FetchMessage(c.Client.ctx)
 		if err != nil {
-			if client.ctx.Err() != nil {
+			if c.Client.ctx.Err() != nil {
 				return
 			}
-			client.log.Errorf("Fetch error: %v", err)
+			c.Client.log.Errorf("Fetch error: %v", err)
 			continue
 		}
 
 		// Deserialize message into Job struct
 		var job Job
 		if err := json.Unmarshal(m.Value, &job); err != nil {
-			client.log.Errorf("JSON unmarshal error: %v", err)
+			c.Client.log.Errorf("JSON unmarshal error: %v", err)
 			// Optionally, commit the message to skip it
-			if err := reader.CommitMessages(client.ctx, m); err != nil {
-				client.log.Errorf("Commit error for malformed message: %v", err)
+			if err := reader.CommitMessages(c.Client.ctx, m); err != nil {
+				c.Client.log.Errorf("Commit error for malformed message: %v", err)
 			}
 			continue
 		}
 
 		// Process first
 		if err := handler(m.Key, job.Payload); err != nil {
-			client.log.Errorf("Handler error: %v", err)
+			c.Client.log.Errorf("Handler error: %v", err)
 
 			// Increment retry count and optionally call onFailure callback
 			job.Retries++
 
-			if onFailure != nil {
-				onFailure(m.Key, job, err)
+			if c.onFailure != nil {
+				c.onFailure(m.Key, job, err)
 			}
 			continue
 		}
 
-		if err := reader.CommitMessages(client.ctx, m); err != nil {
-			client.log.Errorf("Commit error: %v", err)
+		if err := reader.CommitMessages(c.Client.ctx, m); err != nil {
+			c.Client.log.Errorf("Commit error: %v", err)
 		}
 	}
 }
