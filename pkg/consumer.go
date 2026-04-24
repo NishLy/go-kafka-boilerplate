@@ -17,7 +17,6 @@ type Job struct {
 	ID        string          `json:"id"`
 	Topic     string          `json:"topic"`
 	Retries   int             `json:"retries"`
-	Status    string          `json:"status"` // optional
 	CreatedAt time.Time       `json:"created_at"`
 	Payload   json.RawMessage `json:"payload"`
 }
