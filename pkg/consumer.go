@@ -25,6 +25,13 @@ func StartConsumer(client *KafkaClient, topic, groupID string, maxRetries int, h
 		GroupID: groupID,
 	})
 
+	// Handle graceful shutdown
+	defer func() {
+		if err := reader.Close(); err != nil {
+			client.log.Errorf("Error closing reader: %v", err)
+		}
+	}()
+
 	// Ensure cleanup when the context is cancelled or function exits
 	go func() {
 		<-client.ctx.Done()
