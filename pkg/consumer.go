@@ -33,16 +33,20 @@ type KafkaConsumer interface {
 }
 
 func NewConsumer(client *KafkaClient, config kafka.ReaderConfig) KafkaConsumer {
+	config.Brokers = client.brokers
+
 	return &kafkaConsumer{
 		Client: client,
 		Config: config,
 	}
 }
 
+// OnFailure sets a callback function that will be called when a job fails to procceds successfully. The callback receives the message key, the job details, and the error that occurred.
 func (c *kafkaConsumer) OnFailure(callback func(key []byte, job Job, err error)) {
 	c.onFailure = callback
 }
 
+// Consume starts consuming messages from the configured Kafka topic and processes them using the provided handler function. (block until context is cancelled)
 func (c *kafkaConsumer) Consume(handler func(key []byte, payload json.RawMessage) error) {
 	if handler == nil {
 		c.Client.log.Warnf("No handler provided for Consume, exiting")
