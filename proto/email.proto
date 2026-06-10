@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package proto;
+
+option go_package = "github.com/NishLy/go-kafka-boilerplate/proto;protomsg";
+
+message EmailRequest {
+  string project_id = 1;
+  string template_id = 2;
+  string recipient = 3;
+  map<string, string> variables = 4;
+  repeated string attachment_paths = 5;
+}
+
+message Variables {
+  string name = 1;
+}

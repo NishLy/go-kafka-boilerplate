@@ -1,74 +1,73 @@
-package pkg
+package kafkahelper
 
 import (
 	"encoding/json"
-	"time"
 
+	protomsg "github.com/NishLy/go-kafka-boilerplate/proto"
 	"github.com/segmentio/kafka-go"
+	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 )
 
 type ConsumerConfig struct {
-	Topic      string
-	GroupID    string
-	MaxRetries int
+	kafka.ReaderConfig
+	MaxMessageFailures int32
 }
 
-type Job struct {
-	ID        string          `json:"id"`
-	Topic     string          `json:"topic"`
-	Retries   int             `json:"retries"`
-	CreatedAt time.Time       `json:"created_at"`
-	Payload   json.RawMessage `json:"payload"`
-}
-
-type kafkaConsumer struct {
-	Client    *KafkaClient
-	Config    kafka.ReaderConfig
-	onFailure func(key []byte, job Job, err error)
+type Consumer struct {
+	Client    *Client
+	Config    ConsumerConfig
+	onFailure func(key []byte, e *protomsg.Envelope, err error)
 }
 
 type KafkaConsumer interface {
 	Consume(handler func(key []byte, payload json.RawMessage) error)
-	OnFailure(func(key []byte, job Job, err error))
+	OnFailure(func(key []byte, e *protomsg.Envelope, err error))
 }
 
-func NewConsumer(client *KafkaClient, config kafka.ReaderConfig) KafkaConsumer {
+func NewConsumer(client *Client, config ConsumerConfig) KafkaConsumer {
 	config.Brokers = client.brokers
 
-	return &kafkaConsumer{
+	if config.MaxMessageFailures == 0 {
+		config.MaxMessageFailures = 5
+	}
+
+	return &Consumer{
 		Client: client,
 		Config: config,
 	}
 }
 
 // OnFailure sets a callback function that will be called when a job fails to procceds successfully. The callback receives the message key, the job details, and the error that occurred.
-func (c *kafkaConsumer) OnFailure(callback func(key []byte, job Job, err error)) {
+func (c *Consumer) OnFailure(callback func(key []byte, e *protomsg.Envelope, err error)) {
 	c.onFailure = callback
 }
 
 // Consume starts consuming messages from the configured Kafka topic and processes them using the provided handler function. (block until context is cancelled)
-func (c *kafkaConsumer) Consume(handler func(key []byte, payload json.RawMessage) error) {
+func (c *Consumer) Consume(handler func(key []byte, payload json.RawMessage) error) {
 	if handler == nil {
-		c.Client.log.Warnf("No handler provided for Consume, exiting")
+		c.Client.log.Warn("No handler provided for Consume, exiting")
 		return
 	}
 
-	reader := kafka.NewReader(c.Config)
+	reader := kafka.NewReader(c.Config.ReaderConfig)
 
 	// Handle graceful shutdown
 	defer func() {
 		if err := reader.Close(); err != nil {
-			c.Client.log.Errorf("Error closing reader: %v", err)
+			c.Client.log.Error("Error closing reader", zap.Error(err))
 		}
 	}()
 
 	// Ensure cleanup when the context is cancelled or function exits
 	go func() {
 		<-c.Client.ctx.Done()
-		reader.Close()
+		if err := reader.Close(); err != nil {
+			c.Client.log.Error("Error closing reader on context cancellation", zap.Error(err))
+		}
 	}()
 
-	c.Client.log.Infof("Consumer started for topic: %s, group: %s", c.Config.Topic, c.Config.GroupID)
+	c.Client.log.Info("Consumer started", zap.String("topic", c.Config.Topic), zap.String("group", c.Config.GroupID))
 
 	for {
 		m, err := reader.FetchMessage(c.Client.ctx)
@@ -76,36 +75,35 @@ func (c *kafkaConsumer) Consume(handler func(key []byte, payload json.RawMessage
 			if c.Client.ctx.Err() != nil {
 				return
 			}
-			c.Client.log.Errorf("Fetch error: %v", err)
+			c.Client.log.Error("Fetch error", zap.Error(err))
 			continue
 		}
 
-		// Deserialize message into Job struct
-		var job Job
-		if err := json.Unmarshal(m.Value, &job); err != nil {
-			c.Client.log.Errorf("JSON unmarshal error: %v", err)
-			// Optionally, commit the message to skip it
-			if err := reader.CommitMessages(c.Client.ctx, m); err != nil {
-				c.Client.log.Errorf("Commit error for malformed message: %v", err)
+		// Deserialize message into Envelope struct
+		var envelope protomsg.Envelope
+		if err := proto.Unmarshal(m.Value, &envelope); err != nil {
+			c.Client.log.Error("Failed to unmarshal message", zap.Error(err))
+
+			if c.onFailure != nil {
+				c.onFailure(m.Key, nil, err)
 			}
+
 			continue
 		}
 
 		// Process first
-		if err := handler(m.Key, job.Payload); err != nil {
-			c.Client.log.Errorf("Handler error: %v", err)
-
-			// Increment retry count and optionally call onFailure callback
-			job.Retries++
+		if err := handler(m.Key, envelope.Payload); err != nil {
+			c.Client.log.Error("Handler error", zap.Error(err))
 
 			if c.onFailure != nil {
-				c.onFailure(m.Key, job, err)
+				c.onFailure(m.Key, &envelope, err)
 			}
+
 			continue
 		}
 
 		if err := reader.CommitMessages(c.Client.ctx, m); err != nil {
-			c.Client.log.Errorf("Commit error: %v", err)
+			c.Client.log.Error("Commit error", zap.Error(err))
 		}
 	}
 }

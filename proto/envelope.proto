@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package proto;
+
+option go_package = "github.com/NishLy/go-kafka-boilerplate/proto;protomsg";
+
+import "google/protobuf/timestamp.proto";
+
+message Envelope {
+	string id = 1;
+	google.protobuf.Timestamp created_at = 2;
+	bytes payload = 4;
+}

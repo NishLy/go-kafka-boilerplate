@@ -1,19 +1,17 @@
-package pkg
+package kafkahelper
 
-import "context"
+import (
+	"context"
 
-type Logger interface {
-	Infof(template string, args ...interface{})
-	Errorf(template string, args ...interface{})
-	Warnf(template string, args ...interface{})
-}
+	"go.uber.org/zap"
+)
 
-type KafkaClient struct {
-	log     Logger
+type Client struct {
+	log     zap.Logger
 	ctx     context.Context
 	brokers []string
 }
 
-func New(l Logger, ctx context.Context, brokers []string) *KafkaClient {
-	return &KafkaClient{log: l, ctx: ctx, brokers: brokers}
+func New(ctx context.Context, brokers []string, log *zap.Logger) *Client {
+	return &Client{ctx: ctx, brokers: brokers, log: *log}
 }

@@ -10,4 +10,5 @@ require (
 	github.com/pierrec/lz4/v4 v4.1.15 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
 	go.uber.org/zap v1.27.1 // indirect
+	google.golang.org/protobuf v1.36.11 // indirect
 )
